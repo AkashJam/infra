@@ -1,0 +1,44 @@
+{
+  "name": "infra (deploy plane)",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+
+  // Deploy-plane toolchain: Terraform + AWS CLI + Docker CLI. Node is added so
+  // the Claude Code extension can run; common-utils gives the `vscode` user.
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": true,
+      "username": "vscode"
+    },
+    "ghcr.io/devcontainers/features/terraform:1": {},
+    "ghcr.io/devcontainers/features/aws-cli:1": {},
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "24"
+    },
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
+  },
+
+  "remoteUser": "vscode",
+
+  // Persist Claude Code credentials/config across container rebuilds.
+  "containerEnv": {
+    "CLAUDE_CONFIG_DIR": "/home/vscode/.claude-config"
+  },
+  "mounts": [
+    "source=${localWorkspaceFolder}/.devcontainer/claude-config,target=/home/vscode/.claude-config,type=bind,consistency=cached"
+  ],
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "anthropic.claude-code",
+        "hashicorp.terraform",
+        "amazonwebservices.aws-toolkit-vscode"
+      ]
+    }
+  }
+
+  // Opt-in: also install the `claude` terminal command.
+  // "postCreateCommand": "npm install -g @anthropic-ai/claude-code"
+}

@@ -1,0 +1,21 @@
+# Claude Code local credentials — never commit
+.devcontainer/claude-config/*
+!.devcontainer/claude-config/.gitkeep
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+# Note: .tfvars are committed (environments/prod) — secrets live in SSM (§10, §13),
+# not in tfvars. Ignore only local override files:
+*.auto.tfvars
+*.local.tfvars
+
+# Env & secrets
+.env
+.env.local
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
