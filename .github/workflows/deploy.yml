@@ -1,0 +1,92 @@
+name: Deploy
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - docker-compose.yml
+      - Caddyfile
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        id: creds
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Sync compose files to the release bucket
+        run: |
+          aws s3 cp docker-compose.yml "s3://${{ vars.RELEASE_BUCKET }}/docker-compose.yml"
+          aws s3 cp Caddyfile "s3://${{ vars.RELEASE_BUCKET }}/Caddyfile"
+
+      # Resolved by tag, not a hardcoded instance ID — matches the `Name` tag
+      # the ec2 Terraform module sets ("${project_name}-${environment}",
+      # "portfolio-prod" with the defaults in environments/prod/prod.tfvars),
+      # so a future instance replacement needs no workflow change.
+      - name: Resolve the box's instance ID
+        id: ec2
+        run: |
+          ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=portfolio-prod" "Name=instance-state-name,Values=running" \
+            --query "Reservations[0].Instances[0].InstanceId" --output text)
+          if [ -z "$ID" ] || [ "$ID" = "None" ]; then
+            echo "No running instance tagged Name=portfolio-prod" >&2
+            exit 1
+          fi
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy over SSM
+        id: deploy
+        env:
+          REGISTRY: ${{ steps.creds.outputs.aws-account-id }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com
+          REGION: ${{ vars.AWS_REGION }}
+          BUCKET: ${{ vars.RELEASE_BUCKET }}
+        run: |
+          cat > commands.json <<JSON
+          {
+            "commands": [
+              "set -euo pipefail",
+              "mkdir -p /opt/app",
+              "aws s3 cp s3://$BUCKET/docker-compose.yml /opt/app/docker-compose.yml",
+              "aws s3 cp s3://$BUCKET/Caddyfile /opt/app/Caddyfile",
+              "aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $REGISTRY",
+              "cd /opt/app && ECR_REGISTRY=$REGISTRY IMAGE_TAG=latest docker compose pull",
+              "cd /opt/app && ECR_REGISTRY=$REGISTRY IMAGE_TAG=latest docker compose up -d --remove-orphans"
+            ]
+          }
+          JSON
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "${{ steps.ec2.outputs.id }}" \
+            --document-name AWS-RunShellScript \
+            --parameters file://commands.json \
+            --query "Command.CommandId" --output text)
+          echo "cmd_id=$CMD_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for the command to finish
+        run: |
+          aws ssm wait command-executed \
+            --command-id "${{ steps.deploy.outputs.cmd_id }}" \
+            --instance-id "${{ steps.ec2.outputs.id }}"
+
+      - name: Health check
+        run: |
+          for i in $(seq 1 10); do
+            if curl -fsS https://akjames.dev/api/ready; then
+              echo "healthy"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "health check failed" >&2
+          exit 1

@@ -1,0 +1,12 @@
+# TLS via Let's Encrypt. The security group only opens 443 (portfolio.md
+# §10.1/§13 — no SSH, and deliberately no port 80 either), so automatic HTTPS
+# must use the TLS-ALPN-01 challenge exclusively (works on 443 alone with the
+# stock Caddy image, no extra config needed — just don't map port 80).
+{
+	email hello@akjames.dev
+}
+
+akjames.dev, www.akjames.dev {
+	reverse_proxy portfolio:3000
+	encode zstd gzip
+}

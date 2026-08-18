@@ -1,0 +1,33 @@
+# v1 Day 1-2 scope: portfolio + caddy only. Go + Redis + Timescale + backup
+# cron join this file in Days 5-9 (portfolio.md §15).
+#
+# ${ECR_REGISTRY} / ${IMAGE_TAG} are supplied as environment variables by
+# infra/.github/workflows/deploy.yml's SSM command at deploy time — not
+# baked into a committed .env, since the registry URI is account-specific
+# and only known once the AWS account exists (Phase B).
+
+services:
+  portfolio:
+    image: ${ECR_REGISTRY}/portfolio:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      - PORT=3000
+      - NEXT_PUBLIC_SITE_URL=https://akjames.dev
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - portfolio
+
+volumes:
+  caddy_data:
+  caddy_config:
