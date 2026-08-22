@@ -1,10 +1,16 @@
-# v1 Day 1-2 scope: portfolio + caddy only. Go + Redis + Timescale + backup
-# cron join this file in Days 5-9 (portfolio.md §15).
+# v1 Day 1-2 scope was portfolio + caddy only. Days 5-9 (portfolio.md §15)
+# added redis + timescale (Phase A0, dev shape) then ticker/ticker-migrate
+# (Phase B, this revision — production shape: EBS-backed bind mount for
+# timescale, redis/timescale no longer host-published now that ticker joins
+# this same network). backup cron runs as a host crontab, not a compose
+# service — see infra/backup.sh and terraform/modules/ec2/main.tf's
+# user_data.
 #
-# ${ECR_REGISTRY} / ${IMAGE_TAG} are supplied as environment variables by
-# infra/.github/workflows/deploy.yml's SSM command at deploy time — not
-# baked into a committed .env, since the registry URI is account-specific
-# and only known once the AWS account exists (Phase B).
+# ${ECR_REGISTRY} / ${IMAGE_TAG} / ${DB_PASSWORD} / ${HEALTHCHECKS_URL} are
+# supplied as environment variables by
+# infra/.github/workflows/deploy.yml's SSM command at deploy time — DB_PASSWORD
+# is fetched fresh from SSM SecureString on every deploy, never written to a
+# file or committed anywhere (see terraform/modules/ssm/main.tf).
 
 services:
   portfolio:
@@ -13,8 +19,76 @@ services:
     environment:
       - PORT=3000
       - NEXT_PUBLIC_SITE_URL=https://akjames.dev
+      # Server-only (not NEXT_PUBLIC_) — the internal ticker API URL must
+      # never reach the browser (portfolio.md §5, Option B).
+      - TICKER_API_URL=http://ticker:8080
     expose:
       - "3000"
+    depends_on:
+      - ticker
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    expose:
+      - "6379"
+
+  timescale:
+    image: timescale/timescaledb:2.20.3-pg16
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=ticker
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=ticker
+    volumes:
+      # Bind-mounted to the separate EBS data volume (terraform/modules/ec2's
+      # aws_ebs_volume.data, mounted at /mnt/data by user_data) — not an
+      # anonymous Docker volume on the root disk, which is the whole point
+      # of that separate volume existing.
+      - /mnt/data/timescale:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ticker -d ticker"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ticker-migrate:
+    image: ${ECR_REGISTRY}/ticker:${IMAGE_TAG:-latest}
+    environment:
+      - TIMESCALE_DSN=postgres://ticker:${DB_PASSWORD}@timescale:5432/ticker?sslmode=disable
+    command: ["migrate"]
+    depends_on:
+      timescale:
+        condition: service_healthy
+
+  ticker:
+    image: ${ECR_REGISTRY}/ticker:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      - SOURCE=sim
+      - ENV=prod
+      - ADDR=:8080
+      - AGG_WINDOW=1m
+      - LOG_LEVEL=info
+      - TIMESCALE_DSN=postgres://ticker:${DB_PASSWORD}@timescale:5432/ticker?sslmode=disable
+      - REDIS_ADDR=redis:6379
+      # Empty until the healthchecks.io signup is done — DeadMan.Ping is a
+      # no-op with no URL configured (internal/ingest/deadman.go).
+      - HEALTHCHECKS_URL=${HEALTHCHECKS_URL:-}
+    # No `ports:` — internal-only, reached over this Docker network by
+    # `portfolio`'s SSR/SSE-proxy code, never given a public route
+    # (portfolio.md §8, Option B).
+    expose:
+      - "8080"
+    depends_on:
+      ticker-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_started
 
   caddy:
     image: caddy:2-alpine
@@ -31,3 +105,4 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  redis_data:

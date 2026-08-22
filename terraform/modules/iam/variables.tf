@@ -34,3 +34,8 @@ variable "releases_bucket_arn" {
   type        = string
   description = "ARN of the S3 bucket the deploy role writes docker-compose.yml/Caddyfile to, and the EC2 instance role reads them from."
 }
+
+variable "backups_bucket_arn" {
+  type        = string
+  description = "ARN of the S3 bucket infra/backup.sh (run via the EC2 instance role's host crontab) writes nightly pg_dump output to."
+}

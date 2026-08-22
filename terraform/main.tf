@@ -5,6 +5,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
 }
 
@@ -35,6 +39,40 @@ resource "aws_s3_bucket_public_access_block" "releases" {
   restrict_public_buckets = true
 }
 
+# Days 5-9 (portfolio.md §15): nightly pg_dump destination — off-volume
+# durability, distinct from the EBS data volume the dumps are taken from.
+# infra/backup.sh (run via the EC2 instance role's host crontab) writes
+# here; nothing else reads from or writes to this bucket.
+resource "aws_s3_bucket" "backups" {
+  bucket = "${var.project_name}-backups-${data.aws_caller_identity.current.account_id}"
+}
+
+resource "aws_s3_bucket_public_access_block" "backups" {
+  bucket = aws_s3_bucket.backups.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+# Backups need no long memory at v1 scale (Risk Register #2 already accepts
+# ~24h data-loss exposure as the actual bound, not "keep backups forever") —
+# expire after 30 days so the bucket doesn't grow unbounded.
+resource "aws_s3_bucket_lifecycle_configuration" "backups" {
+  bucket = aws_s3_bucket.backups.id
+
+  rule {
+    id     = "expire-old-backups"
+    status = "Enabled"
+    filter {}
+
+    expiration {
+      days = 30
+    }
+  }
+}
+
 module "ecr" {
   source = "./modules/ecr"
 }
@@ -47,6 +85,7 @@ module "iam" {
   github_owner        = var.github_owner
   ecr_repo_arns       = module.ecr.repository_arns
   releases_bucket_arn = aws_s3_bucket.releases.arn
+  backups_bucket_arn  = aws_s3_bucket.backups.arn
 }
 
 module "ssm" {

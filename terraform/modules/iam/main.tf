@@ -57,6 +57,8 @@ data "aws_iam_policy_document" "github_ci_policy" {
     effect = "Allow"
     actions = [
       "ecr:BatchCheckLayerAvailability",
+      "ecr:BatchGetImage",
+      "ecr:GetDownloadUrlForLayer",
       "ecr:PutImage",
       "ecr:InitiateLayerUpload",
       "ecr:UploadLayerPart",
@@ -222,6 +224,13 @@ data "aws_iam_policy_document" "ec2_policy" {
     effect    = "Allow"
     actions   = ["s3:GetObject"]
     resources = ["${var.releases_bucket_arn}/*"]
+  }
+
+  statement {
+    sid       = "BackupWrite"
+    effect    = "Allow"
+    actions   = ["s3:PutObject"]
+    resources = ["${var.backups_bucket_arn}/*"]
   }
 }
 

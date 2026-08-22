@@ -95,6 +95,37 @@ locals {
     chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
     mkdir -p /opt/app
+
+    # Days 5-9 (portfolio.md §15): format + mount the separate EBS data
+    # volume (aws_ebs_volume.data below) for Timescale's data directory.
+    # blkid-guarded so re-running user_data (or a future instance
+    # replacement reusing this same script) never reformats a volume that
+    # already has a filesystem — this only runs meaningfully on a genuinely
+    # fresh volume. NOTE: user_data only executes on first boot — this has
+    # no effect on an already-running instance; that needs the matching
+    # one-time manual command run once via SSM Session Manager.
+    if ! blkid /dev/xvdf; then
+      mkfs -t xfs /dev/xvdf
+    fi
+    mkdir -p /mnt/data
+    grep -q '/dev/xvdf' /etc/fstab || echo '/dev/xvdf /mnt/data xfs defaults,nofail 0 2' >> /etc/fstab
+    mount -a
+    # Just the mount point for the bind mount in docker-compose.yml — the
+    # official Postgres/Timescale image's entrypoint fixes ownership of an
+    # empty data directory itself (starts as root, chowns, then drops to
+    # the postgres user), so no manual chown here.
+    mkdir -p /mnt/data/timescale
+
+    # Nightly backup (§15) — host crontab rather than a compose service:
+    # fewer moving parts, reuses the instance role's AWS credentials
+    # directly via `aws s3 sync`. /opt/app/backup.sh is delivered by
+    # infra/.github/workflows/deploy.yml the same way docker-compose.yml is
+    # — this cron entry is a no-op (logs an error, self-heals) until the
+    # first successful deploy lands that file.
+    dnf install -y cronie
+    systemctl enable --now crond
+    echo '0 3 * * * root /opt/app/backup.sh >> /var/log/ticker-backup.log 2>&1' > /etc/cron.d/ticker-backup
+    chmod 644 /etc/cron.d/ticker-backup
   EOF
 }
 
@@ -105,6 +136,12 @@ resource "aws_instance" "app" {
   vpc_security_group_ids = [aws_security_group.web.id]
   iam_instance_profile   = var.instance_profile_name
   user_data              = local.user_data
+  # Explicit, not left to the provider default: user_data changes (like this
+  # phase's EBS-mount/backup-cron addition) only take effect on a FUTURE
+  # instance replacement anyway (cloud-init runs user_data once, at first
+  # boot) — this box is already live serving production traffic, and a
+  # destroy+recreate is never the right response to a user_data-only diff.
+  user_data_replace_on_change = false
 
   root_block_device {
     volume_size = 30

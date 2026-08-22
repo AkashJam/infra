@@ -7,6 +7,12 @@ on:
     paths:
       - docker-compose.yml
       - Caddyfile
+  # Days 5-9 (portfolio.md §15): portfolio/ticker CI fires this after every
+  # image push to main — a bare image push doesn't touch docker-compose.yml,
+  # so without this trigger nothing would redeploy it. Same generic
+  # "pull latest, up -d" below handles either trigger identically.
+  repository_dispatch:
+    types: [image-pushed]
 
 permissions:
   contents: read
@@ -29,6 +35,7 @@ jobs:
         run: |
           aws s3 cp docker-compose.yml "s3://${{ vars.RELEASE_BUCKET }}/docker-compose.yml"
           aws s3 cp Caddyfile "s3://${{ vars.RELEASE_BUCKET }}/Caddyfile"
+          aws s3 cp backup.sh "s3://${{ vars.RELEASE_BUCKET }}/backup.sh"
 
       # Resolved by tag, not a hardcoded instance ID — matches the `Name` tag
       # the ec2 Terraform module sets ("${project_name}-${environment}",
@@ -60,9 +67,13 @@ jobs:
               "mkdir -p /opt/app",
               "aws s3 cp s3://$BUCKET/docker-compose.yml /opt/app/docker-compose.yml",
               "aws s3 cp s3://$BUCKET/Caddyfile /opt/app/Caddyfile",
+              "aws s3 cp s3://$BUCKET/backup.sh /opt/app/backup.sh",
+              "chmod +x /opt/app/backup.sh",
               "aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $REGISTRY",
+              "DB_PASSWORD=\$(aws ssm get-parameter --name /portfolio/prod/db-password --with-decryption --query Parameter.Value --output text)",
+              "HEALTHCHECKS_URL=\$(aws ssm get-parameter --name /portfolio/prod/healthchecks-url --with-decryption --query Parameter.Value --output text 2>/dev/null || echo '')",
               "cd /opt/app && ECR_REGISTRY=$REGISTRY IMAGE_TAG=latest docker compose pull",
-              "cd /opt/app && ECR_REGISTRY=$REGISTRY IMAGE_TAG=latest docker compose up -d --remove-orphans"
+              "cd /opt/app && ECR_REGISTRY=$REGISTRY IMAGE_TAG=latest DB_PASSWORD=\$DB_PASSWORD HEALTHCHECKS_URL=\$HEALTHCHECKS_URL docker compose up -d --remove-orphans"
             ]
           }
           JSON
