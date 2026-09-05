@@ -28,13 +28,22 @@ data "aws_iam_policy_document" "github_ci_trust" {
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      # Wildcarded around owner/repo rather than an exact "owner/repo:*"
-      # match: GitHub's sub claim is "repo:OWNER/REPO:ref:..." for repos
-      # without immutable-ID subject claims enabled, but
+      # GitHub's sub claim is "repo:OWNER/REPO:ref:..." for repos without
+      # immutable-ID subject claims enabled, but
       # "repo:OWNER@owner_id/REPO@repo_id:ref:..." for repos with it on
-      # (confirmed against this project's actual issued token). Matches both
-      # without hardcoding account-specific numeric IDs into HCL.
-      values = [for repo in var.github_ci_repos : "repo:${var.github_owner}*/${repo}*:*"]
+      # (confirmed against this project's actual issued token). Both forms
+      # are enumerated exactly rather than absorbed by a trailing "*" on
+      # each segment: "OWNER*" would also match any account whose name
+      # merely *starts* with OWNER, and GitHub account names are
+      # first-come. Wildcarding after "@" is safe — neither account nor
+      # repository names may contain "@", so it can only ever stand in for
+      # the numeric ID, which stays out of version-controlled HCL.
+      values = flatten([
+        for repo in var.github_ci_repos : [
+          "repo:${var.github_owner}/${repo}:*",
+          "repo:${var.github_owner}@*/${repo}@*:*",
+        ]
+      ])
     }
   }
 }
@@ -97,8 +106,12 @@ data "aws_iam_policy_document" "github_deploy_trust" {
       variable = "token.actions.githubusercontent.com:sub"
       # StringLike, not StringEquals — see the matching comment on
       # github_ci_trust above; an exact-match test can't tolerate GitHub's
-      # immutable-ID subject claim format at all.
-      values = ["repo:${var.github_owner}*/${var.github_deploy_repo}*:ref:refs/heads/main"]
+      # immutable-ID subject claim format at all. Both claim forms are
+      # enumerated exactly, for the same reason given there.
+      values = [
+        "repo:${var.github_owner}/${var.github_deploy_repo}:ref:refs/heads/main",
+        "repo:${var.github_owner}@*/${var.github_deploy_repo}@*:ref:refs/heads/main",
+      ]
     }
   }
 }

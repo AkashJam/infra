@@ -21,10 +21,15 @@ locals {
         rulePriority = 1
         description  = "Keep the last 10 tagged images"
         selection = {
-          tagStatus     = "tagged"
-          tagPrefixList = ["v", "latest"]
-          countType     = "imageCountMoreThan"
-          countNumber   = 10
+          tagStatus = "tagged"
+          # tagPatternList, not tagPrefixList — CI tags every image
+          # <commit-sha> + latest (never v*), so a prefix match on ["v",
+          # "latest"] only ever matched the single "latest" tag and never
+          # the SHA tags, leaving every pushed image to accumulate forever.
+          # "*" matches every tag so this rule actually prunes.
+          tagPatternList = ["*"]
+          countType      = "imageCountMoreThan"
+          countNumber    = 10
         }
         action = {
           type = "expire"
