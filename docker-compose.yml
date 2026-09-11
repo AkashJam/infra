@@ -6,8 +6,8 @@
 # service — see infra/backup.sh and terraform/modules/ec2/main.tf's
 # user_data.
 #
-# ${ECR_REGISTRY} / ${IMAGE_TAG} / ${DB_PASSWORD} / ${HEALTHCHECKS_URL} are
-# supplied as environment variables by
+# ${ECR_REGISTRY} / ${IMAGE_TAG} / ${DB_PASSWORD} / ${HEALTHCHECKS_URL} /
+# ${GRAFANA_ADMIN_PASSWORD} are supplied as environment variables by
 # infra/.github/workflows/deploy.yml's SSM command at deploy time — DB_PASSWORD
 # is fetched fresh from SSM SecureString on every deploy, never written to a
 # file or committed anywhere (see terraform/modules/ssm/main.tf).
@@ -90,6 +90,38 @@ services:
       redis:
         condition: service_started
 
+  prometheus:
+    image: prom/prometheus:v3.13.3
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    expose:
+      - "9090"
+    depends_on:
+      - ticker
+
+  grafana:
+    image: grafana/grafana:13.0.2
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - GF_SERVER_ROOT_URL=https://grafana.akjames.dev
+      - GF_USERS_ALLOW_SIGN_UP=false
+      # We use none of the bundled apps (Loki/Pyroscope/traces explore)
+      # Grafana otherwise fetches from its plugin catalog on every first
+      # boot — skips that network round-trip and cuts boot time noticeably.
+      - GF_PLUGINS_PREINSTALL_DISABLED=true
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    expose:
+      - "3000"
+    depends_on:
+      - prometheus
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -101,8 +133,11 @@ services:
       - caddy_config:/config
     depends_on:
       - portfolio
+      - grafana
 
 volumes:
   caddy_data:
   caddy_config:
   redis_data:
+  prometheus_data:
+  grafana_data:

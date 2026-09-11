@@ -22,6 +22,14 @@ resource "aws_route53_record" "www" {
   records = [var.eip_address]
 }
 
+resource "aws_route53_record" "grafana" {
+  zone_id = data.aws_route53_zone.primary.zone_id
+  name    = "grafana.${var.domain_name}"
+  type    = "A"
+  ttl     = 300
+  records = [var.eip_address]
+}
+
 # Adopts the (already registered, out-of-band via CLI) domain into Terraform
 # state so auto-renew/transfer-lock become code-managed going forward. This
 # does not register the domain — aws_route53domains_domain would, but its

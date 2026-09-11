@@ -22,3 +22,9 @@ output "instance_public_ip" {
   value       = module.ec2.eip_address
   description = "The box's public IP — should match what akjames.dev resolves to."
 }
+
+output "grafana_admin_password" {
+  value       = module.ssm.grafana_admin_password
+  description = "Grafana admin login — retrieve with `terraform output -raw grafana_admin_password`."
+  sensitive   = true
+}

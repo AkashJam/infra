@@ -20,12 +20,15 @@ an image; they share nothing else with this repo or with each other.
 
 ```mermaid
 flowchart TD
-  R53["Route53 A record<br/>akjames.dev, www"] --> EIP["Elastic IP"] --> EC2
+  R53["Route53 A records<br/>akjames.dev, www, grafana"] --> EIP["Elastic IP"] --> EC2
   subgraph EC2["EC2 t4g.small · AL2023 arm64 · Docker Compose"]
     CADDY["Caddy :443<br/>Let's Encrypt (TLS-ALPN-01)"] --> PF["portfolio<br/>Next.js :3000"]
+    CADDY --> GRAF["grafana :3000 (internal)"]
     PF --> TK["ticker<br/>Go :8080 (internal)"]
     TK --> RD[("redis")]
     TK --> TSDB[("timescale<br/>bind-mount /mnt/data EBS")]
+    PROM["prometheus :9090 (internal)"] -->|scrapes /metrics| TK
+    GRAF -->|queries| PROM
   end
   CRON["host cron 03:00 UTC"] -->|pg_dump| S3B[("S3 portfolio-backups")]
 ```
@@ -51,12 +54,12 @@ two S3 buckets:
 |---|---|
 | [`ecr`](terraform/modules/ecr) | Two image repos (`portfolio`, `ticker`), scan-on-push, a lifecycle policy keeping the last 10 tagged images |
 | [`iam`](terraform/modules/iam) | The GitHub OIDC provider; a **CI role** (assumable from either app repo, any ref — ECR push only); a **deploy role** (assumable from this repo, `main` only — `ssm:SendCommand` scoped to the tagged instance); the **EC2 instance role** (ECR pull, scoped SSM parameter reads, S3 read/write for releases/backups) |
-| [`ssm`](terraform/modules/ssm) | A generated 32-char alphanumeric DB password, stored as an SSM `SecureString` — never typed or seen by a human |
+| [`ssm`](terraform/modules/ssm) | Generated secrets stored as SSM `SecureString`s: a 32-char alphanumeric DB password and a 24-char Grafana admin password — the DB password is never typed or seen by a human, the Grafana one is retrievable via `terraform output -raw grafana_admin_password` |
 | [`ec2`](terraform/modules/ec2) | The instance itself (AL2023 arm64, `t4g.small`), its security group (443 only), Elastic IP, the separate data EBS volume, and `user_data` that installs Docker/Compose and formats/mounts that volume — but starts no containers; what runs is entirely owned by `deploy.yml` |
-| [`dns`](terraform/modules/dns) | Route53 `A` records for the apex and `www`, and adopts the (separately, imperatively registered) domain into state |
+| [`dns`](terraform/modules/dns) | Route53 `A` records for the apex, `www`, and `grafana`, and adopts the (separately, imperatively registered) domain into state |
 
 Two S3 buckets sit at the root: `portfolio-releases-<account>` (the deploy
-workflow's staging area for `docker-compose.yml`/`Caddyfile`/`backup.sh`) and
+workflow's staging area for `docker-compose.yml`/`Caddyfile`/`backup.sh`/`monitoring/`) and
 `portfolio-backups-<account>` (nightly dumps, 30-day lifecycle expiry).
 [`terraform/bootstrap/`](terraform/bootstrap) is a separate, one-time module
 that creates the S3 bucket this root module uses as its remote state backend —
@@ -79,8 +82,8 @@ here, since a bare image push doesn't touch `docker-compose.yml`. This repo's
 own [`deploy.yml`](.github/workflows/deploy.yml) also runs on a push to `main`
 that touches `docker-compose.yml`/`Caddyfile`, or on manual
 `workflow_dispatch`. Every trigger does the same thing: assume the deploy role
-over OIDC, sync `docker-compose.yml`/`Caddyfile`/`backup.sh` to the releases
-bucket, resolve the running instance by its `Name` tag, then
+over OIDC, sync `docker-compose.yml`/`Caddyfile`/`backup.sh`/`monitoring/` to
+the releases bucket, resolve the running instance by its `Name` tag, then
 `aws ssm send-command` on the box to fetch the DB password from SSM and run
 `docker compose pull && up -d`. No static AWS credentials exist in any of the
 three repos.
@@ -100,6 +103,10 @@ three repos.
 6. Optional: once you have a [healthchecks.io](https://healthchecks.io) check,
    `aws ssm put-parameter --name /portfolio/prod/healthchecks-url --type SecureString --value <url>` —
    `ticker`'s dead-man switch stays a no-op until this exists.
+7. After `make apply`, run `terraform output -raw grafana_admin_password` (from
+   `terraform/`) to get the Grafana login — username `admin`, at
+   `https://grafana.akjames.dev`. Prometheus itself has no site block/UI of
+   its own; it's reached only from Grafana over the internal Docker network.
 
 ## Make targets
 
@@ -125,8 +132,9 @@ terraform/{variables,outputs,backend}.tf
 terraform/modules/             ecr, iam, ssm, ec2, dns
 terraform/bootstrap/           one-time remote-state bucket (local state, run once)
 terraform/environments/prod/   backend.hcl + prod.tfvars
-docker-compose.yml             the 6 services that run on the box
+docker-compose.yml             the 8 services that run on the box
 Caddyfile                      TLS + reverse proxy
+monitoring/                    prometheus.yml scrape config + grafana provisioning/dashboards
 backup.sh                      nightly pg_dump → S3, run via host crontab
 .github/workflows/deploy.yml   the deploy pipeline described above
 ```
@@ -135,6 +143,6 @@ backup.sh                      nightly pg_dump → S3, run via host crontab
 
 There's no SSH — shell access is `aws ssm start-session --target <instance-id>`.
 Once connected, `docker compose logs -f <service>` for any of `portfolio`,
-`ticker`, `redis`, `timescale`, or `caddy`. Backups land in
+`ticker`, `redis`, `timescale`, `prometheus`, `grafana`, or `caddy`. Backups land in
 `s3://portfolio-backups-<account>/<timestamp>.dump`; restore with
 `pg_restore` against a `docker compose exec timescale` shell.

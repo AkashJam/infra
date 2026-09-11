@@ -10,3 +10,12 @@ akjames.dev, www.akjames.dev {
 	reverse_proxy portfolio:3000
 	encode zstd gzip
 }
+
+# Grafana has its own login (GF_SECURITY_ADMIN_PASSWORD) — Prometheus itself
+# gets no site block here and stays internal-only, same "no public route"
+# precedent as ticker (portfolio.md §8, Option B), since it has no auth of
+# its own to protect it.
+grafana.akjames.dev {
+	reverse_proxy grafana:3000
+	encode zstd gzip
+}

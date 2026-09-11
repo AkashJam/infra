@@ -36,6 +36,7 @@ jobs:
           aws s3 cp docker-compose.yml "s3://${{ vars.RELEASE_BUCKET }}/docker-compose.yml"
           aws s3 cp Caddyfile "s3://${{ vars.RELEASE_BUCKET }}/Caddyfile"
           aws s3 cp backup.sh "s3://${{ vars.RELEASE_BUCKET }}/backup.sh"
+          aws s3 sync monitoring/ "s3://${{ vars.RELEASE_BUCKET }}/monitoring/"
 
       # Resolved by tag, not a hardcoded instance ID — matches the `Name` tag
       # the ec2 Terraform module sets ("${project_name}-${environment}",
@@ -68,12 +69,14 @@ jobs:
               "aws s3 cp s3://$BUCKET/docker-compose.yml /opt/app/docker-compose.yml",
               "aws s3 cp s3://$BUCKET/Caddyfile /opt/app/Caddyfile",
               "aws s3 cp s3://$BUCKET/backup.sh /opt/app/backup.sh",
+              "aws s3 sync s3://$BUCKET/monitoring/ /opt/app/monitoring/",
               "chmod +x /opt/app/backup.sh",
               "aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $REGISTRY",
               "DB_PASSWORD=\$(aws ssm get-parameter --name /portfolio/prod/db-password --with-decryption --query Parameter.Value --output text)",
               "HEALTHCHECKS_URL=\$(aws ssm get-parameter --name /portfolio/prod/healthchecks-url --with-decryption --query Parameter.Value --output text 2>/dev/null || echo '')",
+              "GRAFANA_ADMIN_PASSWORD=\$(aws ssm get-parameter --name /portfolio/prod/grafana-admin-password --with-decryption --query Parameter.Value --output text)",
               "cd /opt/app && ECR_REGISTRY=$REGISTRY IMAGE_TAG=latest docker compose pull",
-              "cd /opt/app && ECR_REGISTRY=$REGISTRY IMAGE_TAG=latest DB_PASSWORD=\$DB_PASSWORD HEALTHCHECKS_URL=\$HEALTHCHECKS_URL docker compose up -d --remove-orphans"
+              "cd /opt/app && ECR_REGISTRY=$REGISTRY IMAGE_TAG=latest DB_PASSWORD=\$DB_PASSWORD HEALTHCHECKS_URL=\$HEALTHCHECKS_URL GRAFANA_ADMIN_PASSWORD=\$GRAFANA_ADMIN_PASSWORD docker compose up -d --remove-orphans"
             ]
           }
           JSON

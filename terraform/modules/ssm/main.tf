@@ -27,3 +27,18 @@ resource "aws_ssm_parameter" "db_password" {
 # `aws ssm put-parameter` CLI command instead. deploy.yml's fetch tolerates
 # it not existing yet (empty HEALTHCHECKS_URL just means DeadMan.Ping is a
 # no-op, per internal/ingest/deadman.go).
+
+# Grafana admin login — unlike healthchecks-url, Terraform *can* generate
+# this one itself (no external account is involved), so it follows the same
+# fully-automated pattern as the DB password: nobody ever types or sees it
+# except via `terraform output -raw grafana_admin_password`.
+resource "random_password" "grafana_admin" {
+  length  = 24
+  special = false
+}
+
+resource "aws_ssm_parameter" "grafana_admin_password" {
+  name  = "/${var.project_name}/${var.environment}/grafana-admin-password"
+  type  = "SecureString"
+  value = random_password.grafana_admin.result
+}
