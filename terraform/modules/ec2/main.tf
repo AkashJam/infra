@@ -15,40 +15,15 @@ data "aws_subnets" "default" {
 # — looked up independently so aws_ebs_volume.data's availability_zone below
 # never has to reference aws_instance.app itself. Referencing the instance
 # directly is what turned a 2026-09 instance replacement (forced by an AMI
-# drift, see the lifecycle block on aws_instance.app) into a *data volume*
-# replacement too: the instance's availability_zone briefly becomes "known
-# after apply" the moment it's replaced, and Terraform treated that as
-# forcing the volume to replace as well, destroying the live Timescale data
-# it held. This resolves to the exact same AZ today (the instance is already
-# pinned to this subnet) — it's a no-op now, and stays that way even across
-# a future instance replacement.
+# data source drift — see the `ami` comment on aws_instance.app below) into a
+# *data volume* replacement too: the instance's availability_zone briefly
+# becomes "known after apply" the moment it's replaced, and Terraform treated
+# that as forcing the volume to replace as well, destroying the live
+# Timescale data it held. This resolves to the exact same AZ today (the
+# instance is already pinned to this subnet) — it's a no-op now, and stays
+# that way even across a future instance replacement.
 data "aws_subnet" "selected" {
   id = data.aws_subnets.default.ids[0]
-}
-
-data "aws_ami" "al2023_arm64" {
-  most_recent = true
-  owners      = ["amazon"]
-
-  filter {
-    name   = "name"
-    values = ["al2023-ami-*-arm64"]
-  }
-
-  filter {
-    name   = "architecture"
-    values = ["arm64"]
-  }
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-
-  filter {
-    name   = "root-device-type"
-    values = ["ebs"]
-  }
 }
 
 # 443 in only — no SSH port. Operator shell access is `aws ssm start-session`
@@ -145,7 +120,19 @@ locals {
 }
 
 resource "aws_instance" "app" {
-  ami                    = data.aws_ami.al2023_arm64.id
+  # Pinned, not looked up via a `most_recent = true` data source (which is
+  # what this used to be) — 2026-09-11 incident: an untracked newer AMI got
+  # picked up on a routine apply, forcing this instance to replace, and that
+  # AMI (ami-05900cf5eb901ce0e) turned out to have a broken/non-registering
+  # SSM Agent (confirmed: two fresh instances built from it never appeared in
+  # `aws ssm describe-instance-information`, despite IAM/security
+  # group/routing/DNS/NACLs all checking out clean). ami-0fe3c7fe7b8cda278 is
+  # the AMI this box ran on successfully for weeks beforehand — pinning back
+  # to it, permanently, fixed SSM registration immediately. To deliberately
+  # move to a newer AMI later: change this value and test SSM registration
+  # on a review/staging instance first, rather than trusting `most_recent`
+  # again.
+  ami                    = "ami-0fe3c7fe7b8cda278"
   instance_type          = var.instance_type
   subnet_id              = data.aws_subnets.default.ids[0]
   vpc_security_group_ids = [aws_security_group.web.id]
@@ -165,20 +152,6 @@ resource "aws_instance" "app" {
 
   tags = {
     Name = "${var.project_name}-${var.environment}"
-  }
-
-  lifecycle {
-    # data.aws_ami.al2023_arm64 uses most_recent = true with no version
-    # pinning, so it silently resolves to a newer AMI on literally any
-    # apply once AWS publishes one — 2026-09 incident: that alone forced
-    # this instance to be replaced (destroying the attached data volume in
-    # the process, see aws_ebs_volume.data's now-decoupled availability_zone
-    # above). Ignoring drift on `ami` here means an apply can never again
-    # propose replacing this box just because a newer AMI exists. To
-    # deliberately upgrade later: `terraform apply
-    # -replace=module.ec2.aws_instance.app` — a reviewed, explicit action
-    # instead of an accidental side effect of an unrelated change.
-    ignore_changes = [ami]
   }
 }
 
