@@ -170,6 +170,18 @@ data "aws_iam_policy_document" "github_deploy_policy" {
     actions   = ["s3:PutObject"]
     resources = ["${var.releases_bucket_arn}/*"]
   }
+
+  # `aws s3 sync` (used for monitoring/, unlike the single-file `aws s3 cp`
+  # calls) diffs local vs. remote first via ListObjectsV2, which needs
+  # s3:ListBucket on the bucket ARN itself — object-level PutObject above
+  # doesn't cover it. Bucket ARN (no /*), matching how ListBucket is always
+  # scoped.
+  statement {
+    sid       = "ListReleaseArtifacts"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = [var.releases_bucket_arn]
+  }
 }
 
 resource "aws_iam_role_policy" "github_deploy" {
@@ -237,6 +249,16 @@ data "aws_iam_policy_document" "ec2_policy" {
     effect    = "Allow"
     actions   = ["s3:GetObject"]
     resources = ["${var.releases_bucket_arn}/*"]
+  }
+
+  # deploy.yml's box-side "aws s3 sync s3://$BUCKET/monitoring/ ..." needs
+  # s3:ListBucket to enumerate what's there before downloading — same gap as
+  # the matching statement on github_deploy_policy above, same fix.
+  statement {
+    sid       = "ListReleaseArtifacts"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = [var.releases_bucket_arn]
   }
 
   statement {
