@@ -18,6 +18,18 @@ variable "instance_type" {
 variable "github_owner" {
   type        = string
   description = "GitHub account/org that owns the portfolio/ticker/infra repos."
+
+  # 2026-09 incident: running `terraform apply` without -var-file skipped
+  # prod.tfvars entirely, and since this variable has no default, Terraform
+  # prompted interactively — an email address got typed in by mistake and
+  # silently became part of the OIDC trust policy's sub condition, breaking
+  # every deploy. GitHub usernames/orgs can never contain "@" (see the
+  # matching comment in modules/iam/main.tf), so reject it here at plan
+  # time instead of failing much later inside AWS's OIDC token validation.
+  validation {
+    condition     = !strcontains(var.github_owner, "@")
+    error_message = "github_owner must be a GitHub username/org (e.g. \"AkashJam\"), not an email address."
+  }
 }
 
 variable "project_name" {

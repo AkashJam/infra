@@ -11,6 +11,21 @@ data "aws_subnets" "default" {
   }
 }
 
+# Same subnet aws_instance.app launches into (data.aws_subnets.default.ids[0])
+# — looked up independently so aws_ebs_volume.data's availability_zone below
+# never has to reference aws_instance.app itself. Referencing the instance
+# directly is what turned a 2026-09 instance replacement (forced by an AMI
+# drift, see the lifecycle block on aws_instance.app) into a *data volume*
+# replacement too: the instance's availability_zone briefly becomes "known
+# after apply" the moment it's replaced, and Terraform treated that as
+# forcing the volume to replace as well, destroying the live Timescale data
+# it held. This resolves to the exact same AZ today (the instance is already
+# pinned to this subnet) — it's a no-op now, and stays that way even across
+# a future instance replacement.
+data "aws_subnet" "selected" {
+  id = data.aws_subnets.default.ids[0]
+}
+
 data "aws_ami" "al2023_arm64" {
   most_recent = true
   owners      = ["amazon"]
@@ -151,6 +166,20 @@ resource "aws_instance" "app" {
   tags = {
     Name = "${var.project_name}-${var.environment}"
   }
+
+  lifecycle {
+    # data.aws_ami.al2023_arm64 uses most_recent = true with no version
+    # pinning, so it silently resolves to a newer AMI on literally any
+    # apply once AWS publishes one — 2026-09 incident: that alone forced
+    # this instance to be replaced (destroying the attached data volume in
+    # the process, see aws_ebs_volume.data's now-decoupled availability_zone
+    # above). Ignoring drift on `ami` here means an apply can never again
+    # propose replacing this box just because a newer AMI exists. To
+    # deliberately upgrade later: `terraform apply
+    # -replace=module.ec2.aws_instance.app` — a reviewed, explicit action
+    # instead of an accidental side effect of an unrelated change.
+    ignore_changes = [ami]
+  }
 }
 
 resource "aws_eip_association" "app" {
@@ -161,7 +190,7 @@ resource "aws_eip_association" "app" {
 # Separate persistent volume for Postgres/Timescale data (Days 5-9) — kept
 # apart from the root volume so it survives an instance replacement.
 resource "aws_ebs_volume" "data" {
-  availability_zone = aws_instance.app.availability_zone
+  availability_zone = data.aws_subnet.selected.availability_zone
   size              = var.data_volume_size_gb
   type              = "gp3"
 

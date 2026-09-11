@@ -120,6 +120,14 @@ three repos.
 | `make destroy` | `terraform destroy -var-file=environments/prod/prod.tfvars` |
 | `make deploy` | Manually triggers the `Deploy` workflow (`gh workflow run`) — normally this fires on its own after a push, see Deploy flow above |
 
+**Always run Terraform through these targets (or pass
+`-var-file=environments/prod/prod.tfvars` yourself) — never a bare
+`terraform plan`/`apply`.** `github_owner` has no default, so a bare
+invocation prompts for it interactively instead of erroring, and `tags`
+silently falls back to `{}`; a mistyped value at that prompt (a 2026-09
+incident: an email address instead of `AkashJam`) goes straight into the
+OIDC trust policy and breaks every deploy.
+
 There's deliberately no `make dev` here — this repo doesn't run a dev server;
 its unit of work is a Terraform apply or a triggered deploy, both covered
 above.
