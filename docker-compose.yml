@@ -22,6 +22,13 @@ services:
       # Server-only (not NEXT_PUBLIC_) — the internal ticker API URL must
       # never reach the browser (portfolio.md §5, Option B).
       - TICKER_API_URL=http://ticker:8080
+      # Not a secret (a DSN only submits events, never reads Sentry data) —
+      # committed as plain text. This is what sentry.server.config.ts /
+      # sentry.edge.config.ts read at container start; the *client bundle*
+      # copy is a separate build-time --build-arg in portfolio's own
+      # .github/workflows/ci.yml, since NEXT_PUBLIC_ vars are inlined by
+      # `next build`, not read at runtime.
+      - NEXT_PUBLIC_SENTRY_DSN=https://7b2bf32f945d193431cbc2c236b75274@o4512068524834816.ingest.de.sentry.io/4512068555505744
     expose:
       - "3000"
     depends_on:
