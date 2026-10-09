@@ -22,6 +22,10 @@ services:
       # Server-only (not NEXT_PUBLIC_) — the internal ticker API URL must
       # never reach the browser (portfolio.md §5, Option B).
       - TICKER_API_URL=http://ticker:8080
+      # Server-side read for the Market Ticker case study's measured-latency
+      # tiles (phase7.md Step 6). Deliberately no depends_on:
+      # with Prometheus down the tiles degrade to placeholders, the page stays up.
+      - PROMETHEUS_URL=http://prometheus:9090
       # Not a secret (a DSN only submits events, never reads Sentry data) —
       # committed as plain text. This is what sentry.server.config.ts /
       # sentry.edge.config.ts read at container start; the *client bundle*
