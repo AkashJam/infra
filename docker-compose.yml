@@ -43,6 +43,13 @@ services:
     restart: unless-stopped
     volumes:
       - redis_data:/data
+    # A Redis whose process died still showed "Up" for days (2026-10-09
+    # outage); this makes that visible as `unhealthy` in `docker ps`.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     expose:
       - "6379"
 
@@ -99,7 +106,7 @@ services:
       ticker-migrate:
         condition: service_completed_successfully
       redis:
-        condition: service_started
+        condition: service_healthy
 
   prometheus:
     image: prom/prometheus:v3.13.3
