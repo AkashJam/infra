@@ -103,6 +103,10 @@ three repos.
 6. Optional: once you have a [healthchecks.io](https://healthchecks.io) check,
    `aws ssm put-parameter --name /portfolio/prod/healthchecks-url --type SecureString --value <url>` —
    `ticker`'s dead-man switch stays a no-op until this exists.
+   For the Phase 8 daily-bar sweep, add two more the same way:
+   `/portfolio/prod/finnhub-api-key` (the Finnhub key) and
+   `/portfolio/prod/healthchecks-sweep-url` (a second healthchecks.io check,
+   weekdays only). The deploy tolerates either being absent.
 7. After `make apply`, run `terraform output -raw grafana_admin_password` (from
    `terraform/`) to get the Grafana login — username `admin`, at
    `https://grafana.akjames.dev`. Prometheus itself has no site block/UI of

@@ -74,9 +74,11 @@ jobs:
               "aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $REGISTRY",
               "DB_PASSWORD=\$(aws ssm get-parameter --name /portfolio/prod/db-password --with-decryption --query Parameter.Value --output text)",
               "HEALTHCHECKS_URL=\$(aws ssm get-parameter --name /portfolio/prod/healthchecks-url --with-decryption --query Parameter.Value --output text 2>/dev/null || echo '')",
+              "FINNHUB_API_KEY=\$(aws ssm get-parameter --name /portfolio/prod/finnhub-api-key --with-decryption --query Parameter.Value --output text 2>/dev/null || echo '')",
+              "HEALTHCHECKS_SWEEP_URL=\$(aws ssm get-parameter --name /portfolio/prod/healthchecks-sweep-url --with-decryption --query Parameter.Value --output text 2>/dev/null || echo '')",
               "GRAFANA_ADMIN_PASSWORD=\$(aws ssm get-parameter --name /portfolio/prod/grafana-admin-password --with-decryption --query Parameter.Value --output text)",
               "cd /opt/app && ECR_REGISTRY=$REGISTRY IMAGE_TAG=latest docker compose pull",
-              "cd /opt/app && ECR_REGISTRY=$REGISTRY IMAGE_TAG=latest DB_PASSWORD=\$DB_PASSWORD HEALTHCHECKS_URL=\$HEALTHCHECKS_URL GRAFANA_ADMIN_PASSWORD=\$GRAFANA_ADMIN_PASSWORD docker compose up -d --remove-orphans"
+              "cd /opt/app && ECR_REGISTRY=$REGISTRY IMAGE_TAG=latest DB_PASSWORD=\$DB_PASSWORD HEALTHCHECKS_URL=\$HEALTHCHECKS_URL FINNHUB_API_KEY=\$FINNHUB_API_KEY HEALTHCHECKS_SWEEP_URL=\$HEALTHCHECKS_SWEEP_URL GRAFANA_ADMIN_PASSWORD=\$GRAFANA_ADMIN_PASSWORD docker compose up -d --remove-orphans"
             ]
           }
           JSON

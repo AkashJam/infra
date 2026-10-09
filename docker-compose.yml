@@ -7,6 +7,7 @@
 # user_data.
 #
 # ${ECR_REGISTRY} / ${IMAGE_TAG} / ${DB_PASSWORD} / ${HEALTHCHECKS_URL} /
+# ${HEALTHCHECKS_SWEEP_URL} / ${FINNHUB_API_KEY} /
 # ${GRAFANA_ADMIN_PASSWORD} are supplied as environment variables by
 # infra/.github/workflows/deploy.yml's SSM command at deploy time — DB_PASSWORD
 # is fetched fresh from SSM SecureString on every deploy, never written to a
@@ -102,6 +103,10 @@ services:
       # Empty until the healthchecks.io signup is done — DeadMan.Ping is a
       # no-op with no URL configured (internal/ingest/deadman.go).
       - HEALTHCHECKS_URL=${HEALTHCHECKS_URL:-}
+      # Phase 8: the daily-bar sweep's key and its own healthchecks.io check.
+      # Both empty until the SSM parameters exist; the ticker tolerates that.
+      - FINNHUB_API_KEY=${FINNHUB_API_KEY:-}
+      - HEALTHCHECKS_SWEEP_URL=${HEALTHCHECKS_SWEEP_URL:-}
     # No `ports:` — internal-only, reached over this Docker network by
     # `portfolio`'s SSR/SSE-proxy code, never given a public route
     # (portfolio.md §8, Option B).
