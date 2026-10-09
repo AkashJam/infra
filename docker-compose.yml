@@ -41,6 +41,11 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    # Hard ceiling (box has 1.8 GB, no swap). `noeviction` on purpose: an
+    # allkeys-* policy could evict the ticks stream, consumer group or
+    # locks and silently corrupt ingestion; failing writes loudly is safer.
+    # With ticks:raw capped (ticker's streamMaxLen) data is ~15-20 MiB.
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
     volumes:
       - redis_data:/data
     # A Redis whose process died still showed "Up" for days (2026-10-09
