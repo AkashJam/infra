@@ -107,6 +107,10 @@ three repos.
    `/portfolio/prod/finnhub-api-key` (the Finnhub key) and
    `/portfolio/prod/healthchecks-sweep-url` (a second healthchecks.io check,
    weekdays only). The deploy tolerates either being absent.
+   For the Phase 10 Atlas reference fetchers, one more:
+   `/portfolio/prod/healthchecks-reference-url` (a third check, daily, ~26h
+   period). They are keyless, so there is no key to add; the deploy tolerates
+   its absence.
 7. After `make apply`, run `terraform output -raw grafana_admin_password` (from
    `terraform/`) to get the Grafana login — username `admin`, at
    `https://grafana.akjames.dev`. Prometheus itself has no site block/UI of
