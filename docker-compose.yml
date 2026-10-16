@@ -93,7 +93,10 @@ services:
     image: ${ECR_REGISTRY}/ticker:${IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
-      - SOURCE=sim
+      # Phase 14 step 10: the real feed. The simulator is dev and CI only now; setting
+      # this back to `sim` is NOT a rollback (the `simulated` flag is gone, so it would
+      # show random walks as real prices). See README, "What a rollback means".
+      - SOURCE=finnhub
       - ENV=prod
       - ADDR=:8080
       - AGG_WINDOW=1m

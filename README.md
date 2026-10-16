@@ -158,7 +158,89 @@ backup.sh                      nightly pg_dump → S3, run via host crontab
 ## Operating the box
 
 There's no SSH — shell access is `aws ssm start-session --target <instance-id>`.
-Once connected, `docker compose logs -f <service>` for any of `portfolio`,
-`ticker`, `redis`, `timescale`, `prometheus`, `grafana`, or `caddy`. Backups land in
-`s3://portfolio-backups-<account>/<timestamp>.dump`; restore with
-`pg_restore` against a `docker compose exec timescale` shell.
+The session starts as `ssm-user` outside the app directory, so first run `sudo -i` and
+`cd /opt/app` (the deploy keeps `docker-compose.yml` there); then `docker compose logs -f <service>`
+for any of `portfolio`, `ticker`, `redis`, `timescale`, `prometheus`, `grafana`, or `caddy`.
+Compose warns that `ECR_REGISTRY`, `DB_PASSWORD` and the other deploy-time variables are unset;
+that only matters when containers are created, so `logs`, `ps` and `exec` are unaffected. Backups
+land in `s3://portfolio-backups-<account>/<timestamp>.dump`; restore with `pg_restore` against a
+`docker compose exec timescale` shell.
+
+## After a deploy: `/atlas` fills in on its own
+
+`/atlas` is empty for a while after every deploy: it says *Atlas data is temporarily unavailable*
+until the ticker has fetched its reference data (the Atlas fetchers run on a schedule and fill Redis
+as they finish), and the page is a cached render that refreshes at most once an hour. It has behaved
+this way after earlier deploys too. It is not a fault, and nothing needs doing; if it is still empty
+after about an hour, check the ticker's logs for the reference fetchers (`docker compose logs ticker | grep -i reference`)
+and the `HEALTHCHECKS_REFERENCE_URL` check.
+
+## Rolling back a release
+
+Each CI build pushes its image twice, as `<repo>:<commit sha>` and `<repo>:latest`, and the deploy
+always pulls `latest`. Rolling back is therefore a retag followed by a redeploy, with no rebuild:
+
+1. Pick the last good commit of the repository to roll back (`portfolio` or `ticker`).
+2. Point `latest` at that commit's image in ECR (from a machine with ECR rights):
+
+   ```bash
+   MANIFEST=$(aws ecr batch-get-image --repository-name ticker --image-ids imageTag=<good-sha> --query 'images[0].imageManifest' --output text)
+   aws ecr put-image --repository-name ticker --image-tag latest --image-manifest "$MANIFEST"
+   ```
+
+3. Run the **Deploy** workflow by hand (it accepts `workflow_dispatch`); it pulls the retagged
+   `latest` and recreates the containers.
+4. Revert or fix the bad commit before the next push to `main`, which would otherwise rebuild and
+   retag `latest` over the rollback.
+
+**A rollback of `ticker` past a migration needs that migration undone first.** `ticker` starts only
+after the one-shot `ticker-migrate` succeeds, and `ticker migrate` only applies migrations upward:
+an older image does not contain the newer migration's files, and golang-migrate refuses a
+database whose current version is missing from its source, so the older image would not start.
+Before retagging, undo the newer migrations by hand, newest first: run each
+`ticker/migrations/<n>_*.down.sql` in `psql` inside the `timescale` container, then set
+`schema_migrations` back to the older version (`UPDATE schema_migrations SET version = <n-1>, dirty = false;`).
+For migration `000006` (the Yahoo backfill) the down file only deletes the backfilled rows; if the
+rows are wanted, setting the version back without running it is enough.
+
+## Promoting the feed (Phase 14 step 10)
+
+Production's `ticker` runs `SOURCE=sim` until the adapter is promoted, and the promotion is its own
+commit so that a problem in a release and a problem in the real feed are never tangled:
+
+1. **Release the code first**, with `SOURCE=sim` still in `docker-compose.yml`: merge `ticker`, then
+   `portfolio`, to `main`. Each CI run pushes its image and fires **Deploy**.
+2. Check the public site (nothing here needs the box): `/api/ready`, `/api/market-state`, `/market`,
+   `/market/MUFG`. On the simulator `/market/state` always says `open`, the sensors have no simulated
+   ticks, and `/market/SIM:NOVA` is still 200; that is expected until step 3.
+3. **Flip the feed**: change `SOURCE=sim` to `SOURCE=finnhub` under `ticker` in `docker-compose.yml`,
+   commit and push to `main`. The path filter fires **Deploy**, which recreates `ticker` (only it:
+   nothing else changed). `FINNHUB_API_KEY` is already passed to it from SSM
+   (`/portfolio/prod/finnhub-api-key`); the ticker refuses to start with `finnhub` and no key.
+4. **Watch it** (`sudo -i`, `cd /opt/app`):
+
+   ```bash
+   docker compose ps                         # ticker should not be restarting
+   docker compose logs --tail 80 -f ticker   # the WebSocket connects and subscribes to 18 symbols;
+                                             # watch for 401 (key) or 429 (rate), and for reconnect loops
+   docker compose exec redis redis-cli XLEN ticks:raw    # climbs in US hours, capped near 100000
+   ```
+
+5. **The gate**, during US hours (13:30–20:00 UTC), from `portfolio/`: `npm run test:prod`. It fails
+   rather than skipping when the market is closed or the feed is not live, and prints a `GATE:` line
+   (symbol, price, the quote's own time) for `phase14.md`.
+
+## What a rollback means once the simulator is gone
+
+The `simulated` flag was removed in Phase 14 (the price's vintage, `asOf`, replaced it), so **setting
+`SOURCE=sim` back in production is not a rollback**: it would show random walks as real prices, with
+nothing on the page to say so. The options are:
+
+- **The feed is misbehaving** (a reconnect loop, wrong prices, rate limits): leave `SOURCE=finnhub`
+  and let the page degrade honestly. A dead feed shows the amber stale pill and `Unreachable.`; a
+  quiet one shows `Closed.` with the last session. Fix forward, or stop the ticker.
+- **The release is bad**: retag `latest` to the last good image as in *Rolling back a release* above.
+  Rolling `ticker` back past Phase 14 means a pre-`asOf` image, which expects `updatedAt` and a
+  `simulated` flag the new `portfolio` no longer reads, so roll both back together.
+- **Old `SIM:` rows** from the simulator stay in the database and Redis. The ticker does not serve
+  them under `finnhub`, so nothing links to them and `/market/SIM:*` is a 404.
