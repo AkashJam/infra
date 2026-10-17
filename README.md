@@ -111,6 +111,14 @@ three repos.
    `/portfolio/prod/healthchecks-reference-url` (a third check, daily, ~26h
    period). They are keyless, so there is no key to add; the deploy tolerates
    its absence.
+   For the Phase 15 EDGAR identity check, one more:
+   `/portfolio/prod/fetch-contact` (a SecureString holding a real name and an
+   address you are willing to give SEC, for example `Your Name you@example.com`).
+   SEC asks automated clients to identify themselves in the User-Agent and
+   throttles or blocks those that do not, so it is a precondition for the EDGAR
+   fetchers, not a nicety. Without it the ticker logs `EDGAR identity check
+   disabled — FETCH_CONTACT is not set` at start-up and runs without that one
+   job; the deploy tolerates its absence.
 7. After `make apply`, run `terraform output -raw grafana_admin_password` (from
    `terraform/`) to get the Grafana login — username `admin`, at
    `https://grafana.akjames.dev`. Prometheus itself has no site block/UI of
