@@ -46,7 +46,12 @@ services:
     # allkeys-* policy could evict the ticks stream, consumer group or
     # locks and silently corrupt ingestion; failing writes loudly is safer.
     # With ticks:raw capped (ticker's streamMaxLen) data is ~15-20 MiB.
-    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    # Snapshot hourly, not Redis's default "60 10000": every trade is a
+    # stream write, so the default rewrote the whole file about once a
+    # minute in market hours, ~1.4 GB of disk writes a day for data that
+    # is transient or rebuilt by the reference catch-up after a restart
+    # (phase17.md step 4, decision 11).
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction", "--save", "3600 1"]
     volumes:
       - redis_data:/data
     # A Redis whose process died still showed "Up" for days (2026-10-09
